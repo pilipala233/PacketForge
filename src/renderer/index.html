@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>PacketForge</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <div>
+          <p class="kicker">Authorized local testing</p>
+          <h1>PacketForge</h1>
+          <p class="muted">
+            Explicit proxy mode with a rule-driven replacement pipeline.
+          </p>
+        </div>
+        <div class="badge">
+          <span class="badge__label">Version</span>
+          <span id="app-version" class="badge__value">-</span>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Status & Controls</h2>
+          <div class="status">
+            <div class="status__row">
+              <span class="label">Proxy</span>
+              <span id="proxy-status" class="value">Stopped</span>
+            </div>
+            <div class="status__row">
+              <span class="label">Rules</span>
+              <span id="rules-count" class="value">0</span>
+            </div>
+            <div class="status__row">
+              <span class="label">Session</span>
+              <span id="session-count" class="value">0</span>
+            </div>
+            <div class="status__row">
+              <span class="label">Port</span>
+              <span id="proxy-port-label" class="value">8080</span>
+            </div>
+          </div>
+
+          <form id="proxy-form" class="form">
+            <div class="field">
+              <label for="proxy-port">Proxy Port</label>
+              <input id="proxy-port" type="number" min="1" max="65535" value="8080" />
+            </div>
+            <div class="button-row">
+              <button type="submit" class="button button--primary">Start</button>
+              <button id="proxy-stop" type="button" class="button button--ghost">Stop</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>HTTPS Intercept</h2>
+          <p class="muted">
+            Enable only with explicit authorization. Install the local CA certificate on test
+            devices to inspect HTTPS traffic.
+          </p>
+          <div class="status">
+            <div class="status__row">
+              <span class="label">Mode</span>
+              <span id="https-mode" class="value">Tunnel</span>
+            </div>
+            <div class="status__row">
+              <span class="label">CA</span>
+              <span id="https-ca-status" class="value">Not generated</span>
+            </div>
+          </div>
+          <form id="https-form" class="form">
+            <div class="field">
+              <div class="toggle">
+                <input id="https-intercept" type="checkbox" />
+                <label for="https-intercept">Enable HTTPS interception</label>
+              </div>
+            </div>
+            <div class="field">
+              <label for="ca-path">CA Certificate Path</label>
+              <input id="ca-path" type="text" readonly />
+            </div>
+            <div class="button-row">
+              <button id="ca-generate" type="button" class="button button--ghost">Generate CA</button>
+              <button id="ca-copy" type="button" class="button button--ghost">Copy Path</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Rules</h2>
+          <form id="rule-form" class="form">
+            <div class="field">
+              <label for="rule-name">Name</label>
+              <input id="rule-name" type="text" placeholder="Replace hero image" required />
+            </div>
+            <div class="field">
+              <label for="rule-priority">Priority</label>
+              <input id="rule-priority" type="number" value="0" />
+            </div>
+            <div class="field">
+              <label for="rule-url">URL Contains</label>
+              <input id="rule-url" type="text" placeholder="/assets/" />
+            </div>
+            <div class="field">
+              <label for="rule-method">Method</label>
+              <select id="rule-method">
+                <option value="">Any</option>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="rule-content-type">Content-Type</label>
+              <input id="rule-content-type" type="text" placeholder="image/png" />
+            </div>
+            <div class="field">
+              <label for="rule-headers">Headers Contains</label>
+              <textarea
+                id="rule-headers"
+                rows="2"
+                placeholder="User-Agent: Mozilla&#10;X-Debug: true"
+              ></textarea>
+            </div>
+            <div class="field">
+              <label for="rule-body-contains">Response Body Contains</label>
+              <input id="rule-body-contains" type="text" placeholder="error code" />
+            </div>
+            <div class="field">
+              <label for="rule-action-type">Action</label>
+              <select id="rule-action-type">
+                <option value="replaceBody">Replace Body</option>
+                <option value="replaceResource">Replace With Resource</option>
+                <option value="block">Block</option>
+                <option value="redirect">Redirect</option>
+              </select>
+            </div>
+            <div class="field" id="rule-text-field">
+              <label for="rule-action-body">Body</label>
+              <textarea id="rule-action-body" rows="3" placeholder="Replacement body"></textarea>
+            </div>
+            <div class="field hidden" id="rule-resource-field">
+              <label for="rule-action-resource">Resource</label>
+              <select id="rule-action-resource"></select>
+            </div>
+            <div class="field hidden" id="rule-redirect-field">
+              <label for="rule-action-location">Redirect Location</label>
+              <input id="rule-action-location" type="text" placeholder="https://example.com" />
+            </div>
+            <div class="field hidden" id="rule-status-field">
+              <label for="rule-action-status">Status</label>
+              <input id="rule-action-status" type="number" min="100" max="599" placeholder="302" />
+            </div>
+            <div class="button-row">
+              <button id="rule-submit" type="submit" class="button button--primary">Add Rule</button>
+              <button id="rule-cancel" type="button" class="button button--ghost hidden">Cancel</button>
+            </div>
+          </form>
+          <ul id="rules-list" class="list"></ul>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div>
+          <h2>Scope</h2>
+          <p class="muted">
+            PacketForge is intended for authorized, local testing only. You must have
+            explicit permission to intercept or modify traffic.
+          </p>
+        </div>
+        <div class="panel__hint">
+          <span class="label">Mode</span>
+          <span class="value">Explicit proxy</span>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="card">
+          <h2>Resources</h2>
+          <form id="resource-form" class="form">
+            <div class="field">
+              <label for="resource-name">Name</label>
+              <input id="resource-name" type="text" placeholder="Hero image" required />
+            </div>
+            <div class="field">
+              <label for="resource-type">Content-Type</label>
+              <input id="resource-type" type="text" placeholder="image/png" />
+            </div>
+            <div class="field">
+              <label for="resource-file">File</label>
+              <input id="resource-file" type="file" required />
+            </div>
+            <button type="submit" class="button button--primary">Add Resource</button>
+          </form>
+          <ul id="resources-list" class="list"></ul>
+        </div>
+
+        <div class="card">
+          <div class="card__header">
+            <h2>Sessions</h2>
+            <button id="sessions-clear" class="button button--ghost">Clear</button>
+          </div>
+          <div class="filter-row">
+            <input id="sessions-filter" type="text" placeholder="Filter by URL or method" />
+            <label class="toggle toggle--compact">
+              <input id="sessions-applied-only" type="checkbox" />
+              <span>Modified only</span>
+            </label>
+          </div>
+          <ul id="sessions-list" class="list list--compact"></ul>
+          <div id="session-detail" class="detail muted">Select a session to inspect.</div>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
