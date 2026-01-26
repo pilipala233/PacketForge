@@ -5,14 +5,104 @@ import tls from 'node:tls';
 import { EventEmitter } from 'node:events';
 import { collectRuleCandidates, normalizeContentType, selectBestRule, selectRule } from './rules.js';
 import { resolveAction } from './actions.js';
+import { createCaptureSession, normalizeCaptureConfig, resolveExtensionInfo } from './capture.js';
 
 const DEFAULT_MAX_BODY_SIZE = 2 * 1024 * 1024;
+const REQUEST_PREVIEW_BYTES = 64 * 1024;
 
 function sanitizeHeaders(headers) {
   const next = { ...headers };
   delete next['proxy-connection'];
   delete next['proxy-authorization'];
   return next;
+}
+
+function isProbablyText(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return true;
+  }
+  const sampleSize = Math.min(buffer.length, 4096);
+  let nonPrintable = 0;
+  for (let i = 0; i < sampleSize; i += 1) {
+    const byte = buffer[i];
+    if (byte === 0x00) {
+      nonPrintable += 2;
+      continue;
+    }
+    if (byte === 0x09 || byte === 0x0a || byte === 0x0d) {
+      continue;
+    }
+    if (byte >= 0x20) {
+      continue;
+    }
+    nonPrintable += 1;
+  }
+  return nonPrintable / sampleSize <= 0.2;
+}
+
+function shouldTreatAsText(contentType, buffer) {
+  const lower = typeof contentType === 'string' ? contentType.toLowerCase() : '';
+  if (
+    lower.startsWith('text/') ||
+    lower.includes('json') ||
+    lower.includes('xml') ||
+    lower.includes('javascript') ||
+    lower.includes('x-www-form-urlencoded')
+  ) {
+    return true;
+  }
+  return isProbablyText(buffer);
+}
+
+function createBodyPreview(limitBytes = REQUEST_PREVIEW_BYTES) {
+  const limit = Number.isFinite(limitBytes) && limitBytes > 0 ? Math.trunc(limitBytes) : 0;
+  let totalBytes = 0;
+  let savedBytes = 0;
+  let truncated = false;
+  let chunks = [];
+  let summary = null;
+  return {
+    handleChunk(chunk) {
+      if (!Buffer.isBuffer(chunk) || chunk.length === 0) {
+        return;
+      }
+      totalBytes += chunk.length;
+      if (savedBytes >= limit) {
+        truncated = true;
+        return;
+      }
+      const remaining = limit - savedBytes;
+      const slice = chunk.length <= remaining ? chunk : chunk.slice(0, remaining);
+      if (slice.length > 0) {
+        chunks.push(slice);
+        savedBytes += slice.length;
+      }
+      if (chunk.length > remaining) {
+        truncated = true;
+      }
+    },
+    finalize(contentType) {
+      if (summary) {
+        return summary;
+      }
+      const buffer = chunks.length > 0 ? Buffer.concat(chunks) : Buffer.alloc(0);
+      const isText = shouldTreatAsText(contentType, buffer);
+      summary = {
+        ok: true,
+        isText,
+        truncated: truncated || totalBytes > savedBytes,
+        bytesRead: savedBytes,
+        totalBytes,
+        text: isText ? buffer.toString('utf8') : null,
+        base64: isText ? null : buffer.toString('base64')
+      };
+      chunks = [];
+      return summary;
+    },
+    stats() {
+      return { totalBytes, savedBytes, truncated: truncated || totalBytes > savedBytes };
+    }
+  };
 }
 
 function resolveTargetUrl(req) {
@@ -97,7 +187,8 @@ export class ProxyServer extends EventEmitter {
     sessionsStore,
     maxBodySize = DEFAULT_MAX_BODY_SIZE,
     httpsMode = 'tunnel',
-    certificateManager = null
+    certificateManager = null,
+    capture = null
   } = {}) {
     super();
     this.port = port;
@@ -108,6 +199,7 @@ export class ProxyServer extends EventEmitter {
     this.maxBodySize = maxBodySize;
     this.httpsMode = httpsMode;
     this.certificateManager = certificateManager;
+    this.captureConfig = normalizeCaptureConfig(capture);
     this.server = null;
     this.mitmServer = http.createServer(this.handleHttp.bind(this));
     this.mitmServer.on('clientError', (error, socket) => {
@@ -115,6 +207,8 @@ export class ProxyServer extends EventEmitter {
     });
     this.running = false;
     this.pendingWrites = new Set();
+    this.activeSockets = new Set();
+    this.paused = false;
   }
 
   status() {
@@ -143,6 +237,7 @@ export class ProxyServer extends EventEmitter {
     this.server.on('clientError', (error, socket) => {
       socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
     });
+    this.trackServerSockets(this.server);
 
     await new Promise((resolve, reject) => {
       this.server.once('error', reject);
@@ -160,15 +255,32 @@ export class ProxyServer extends EventEmitter {
     return this.status();
   }
 
-  async stop() {
+  async stop({ flush = true } = {}) {
     if (!this.server) {
       return this.status();
     }
 
-    await this.flush();
-    await new Promise((resolve) => {
-      this.server.close(() => resolve());
+    if (flush) {
+      await this.flush();
+    }
+    const closePromise = new Promise((resolve) => {
+      this.server.close(() => resolve('closed'));
     });
+    if (!flush) {
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => resolve('timeout'), 1500);
+      });
+      const result = await Promise.race([closePromise, timeoutPromise]);
+      if (result === 'timeout') {
+        this.destroyActiveSockets();
+        await Promise.race([
+          closePromise,
+          new Promise((resolve) => setTimeout(resolve, 500))
+        ]);
+      }
+    } else {
+      await closePromise;
+    }
     this.server = null;
     this.running = false;
     this.emit('status', this.status());
@@ -177,6 +289,7 @@ export class ProxyServer extends EventEmitter {
 
   handleHttp(req, res) {
     const startAt = Date.now();
+    const paused = this.paused === true;
     const targetUrl = resolveTargetUrl(req);
     if (!targetUrl) {
       res.writeHead(400, { 'content-type': 'text/plain' });
@@ -184,10 +297,72 @@ export class ProxyServer extends EventEmitter {
       return;
     }
 
+    const captureSession =
+      !paused && this.captureConfig ? createCaptureSession(this.captureConfig) : null;
+    const requestCapture = null;
+    const responseCapture = captureSession?.response ?? null;
+    const requestPreview = paused ? null : createBodyPreview(REQUEST_PREVIEW_BYTES);
+
+    const buildCaptureFields = () => {
+      const fields = {};
+      const requestSummary = requestCapture?.finalize();
+      const responseSummary = responseCapture?.finalize();
+      if (requestSummary && (requestSummary.totalBytes > 0 || requestSummary.path)) {
+        fields.requestBodyPath = requestSummary.path ?? undefined;
+        fields.requestBodyBytes = requestSummary.totalBytes ?? 0;
+        fields.requestBodySavedBytes = requestSummary.savedBytes ?? 0;
+        fields.requestBodyTruncated = requestSummary.truncated ?? false;
+      }
+      if (!fields.requestBodyPath && requestPreview) {
+        const previewSummary = requestPreview.finalize(req.headers['content-type']);
+        if (previewSummary && (previewSummary.totalBytes > 0 || previewSummary.bytesRead > 0)) {
+          fields.requestBodyPreview = previewSummary;
+          fields.requestBodyBytes = previewSummary.totalBytes ?? 0;
+          fields.requestBodySavedBytes = previewSummary.bytesRead ?? 0;
+          fields.requestBodyTruncated = previewSummary.truncated ?? false;
+        }
+      }
+      if (responseSummary && (responseSummary.totalBytes > 0 || responseSummary.path)) {
+        fields.responseBodyPath = responseSummary.path ?? undefined;
+        fields.responseBodyBytes = responseSummary.totalBytes ?? 0;
+        fields.responseBodySavedBytes = responseSummary.savedBytes ?? 0;
+        fields.responseBodyTruncated = responseSummary.truncated ?? false;
+        if (responseSummary.media) {
+          fields.responseMedia = responseSummary.media;
+        }
+      }
+      return fields;
+    };
+
+    let sessionRecorded = false;
+    const recordOnce = (entry) => {
+      if (paused) {
+        return;
+      }
+      if (sessionRecorded) {
+        return;
+      }
+      sessionRecorded = true;
+      const captureFields = buildCaptureFields();
+      this.recordSession({ requestHeaders, ...entry, ...captureFields });
+    };
+
     const protocol = targetUrl.protocol === 'https:' ? https : http;
-    const headers = sanitizeHeaders(req.headers);
-    headers.host = targetUrl.host;
-    headers['accept-encoding'] = 'identity';
+    const requestHeaders = sanitizeHeaders(req.headers);
+    const headers = {
+      ...requestHeaders,
+      host: targetUrl.host,
+      'accept-encoding': 'identity'
+    };
+    if (requestCapture) {
+      const requestExt = resolveExtensionInfo({
+        contentType: req.headers['content-type'],
+        contentDisposition: req.headers['content-disposition'],
+        url: targetUrl.toString(),
+        fallback: 'bin'
+      });
+      requestCapture.setExtension(requestExt.ext, requestExt.source);
+    }
 
     const requestOptions = {
       method: req.method,
@@ -197,7 +372,51 @@ export class ProxyServer extends EventEmitter {
       headers
     };
 
-    const proxyReq = protocol.request(requestOptions, (proxyRes) => {
+    let proxyReq;
+    const failResponse = (status = 502, message = 'Bad gateway') => {
+      if (res.writableEnded || res.destroyed) {
+        return;
+      }
+      if (!res.headersSent) {
+        res.writeHead(status, { 'content-type': 'text/plain' });
+      }
+      res.end(message);
+    };
+    const handleProxyError = (error) => {
+      console.error('[proxy] Upstream error:', error?.message ?? error);
+      if (proxyReq && !proxyReq.destroyed) {
+        proxyReq.destroy();
+      }
+      failResponse(502, 'Bad gateway');
+      const durationMs = Date.now() - startAt;
+      recordOnce({
+        url: targetUrl.toString(),
+        method: req.method,
+        status: 502,
+        contentType: '',
+        sizeBytes: 0,
+        durationMs,
+        responseHeaders: null,
+        matchedRuleId: null,
+        applied: false
+      });
+    };
+
+    if (requestCapture || requestPreview) {
+      const finalizeRequest = () => {
+        requestCapture?.finalize();
+        requestPreview?.finalize(req.headers['content-type']);
+      };
+      req.on('data', (chunk) => {
+        requestCapture?.handleChunk(chunk);
+        requestPreview?.handleChunk(chunk);
+      });
+      req.on('end', finalizeRequest);
+      req.on('aborted', finalizeRequest);
+      req.on('error', finalizeRequest);
+    }
+
+    proxyReq = protocol.request(requestOptions, (proxyRes) => {
       const contentType = normalizeContentType(proxyRes.headers['content-type']);
       const context = {
         method: req.method,
@@ -205,7 +424,18 @@ export class ProxyServer extends EventEmitter {
         contentType,
         headers: req.headers
       };
-      const rules = this.rulesStore?.list?.() ?? [];
+      if (responseCapture) {
+        const responseExt = resolveExtensionInfo({
+          contentType: proxyRes.headers['content-type'],
+          contentDisposition: proxyRes.headers['content-disposition'],
+          url: targetUrl.toString(),
+          fallback: 'bin'
+        });
+        responseCapture.setExtension(responseExt.ext, responseExt.source);
+      }
+      proxyRes.on('error', handleProxyError);
+      proxyRes.on('aborted', () => handleProxyError(new Error('Upstream aborted')));
+      const rules = paused ? [] : this.rulesStore?.list?.() ?? [];
       const candidates = collectRuleCandidates(rules, context);
       const rule = selectBestRule(candidates.matches);
       const inspect = shouldInspectResponse(
@@ -219,19 +449,24 @@ export class ProxyServer extends EventEmitter {
         let bytes = 0;
         proxyRes.on('data', (chunk) => {
           bytes += chunk.length;
+          responseCapture?.handleChunk(chunk);
+        });
+        proxyRes.on('aborted', () => {
+          responseCapture?.finalize();
         });
         proxyRes.on('end', () => {
           const durationMs = Date.now() - startAt;
-          this.recordSession({
-            url: targetUrl.toString(),
-            method: req.method,
-            status: proxyRes.statusCode ?? 0,
-            contentType: contentType || '',
-            sizeBytes: bytes,
-            durationMs,
-            matchedRuleId: rule?.id ?? null,
-            applied: false
-          });
+        recordOnce({
+          url: targetUrl.toString(),
+          method: req.method,
+          status: proxyRes.statusCode ?? 0,
+          contentType: contentType || '',
+          sizeBytes: bytes,
+          durationMs,
+          responseHeaders: proxyRes.headers,
+          matchedRuleId: rule?.id ?? null,
+          applied: false
+        });
         });
 
         res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
@@ -265,23 +500,46 @@ export class ProxyServer extends EventEmitter {
         res.writeHead(outStatus, outHeaders);
         res.end(outBody);
 
+        if (responseCapture) {
+          const resolvedExt = resolveExtensionInfo({
+            contentType: resolved.contentType || contentType || proxyRes.headers['content-type'],
+            contentDisposition:
+              resolved.headers?.['content-disposition'] ?? proxyRes.headers['content-disposition'],
+            url: targetUrl.toString(),
+            fallback: 'bin'
+          });
+          responseCapture.setExtension(resolvedExt.ext, resolvedExt.source, resolved.modified);
+        }
+        responseCapture?.captureBuffer(outBody);
+
         const durationMs = Date.now() - startAt;
-        this.recordSession({
+        recordOnce({
           url: targetUrl.toString(),
           method: req.method,
           status: outStatus,
           contentType: resolved.contentType || contentType || '',
           sizeBytes: outBody.length,
           durationMs,
+          responseHeaders: outHeaders,
           matchedRuleId: finalRule?.id ?? null,
           applied: resolved.modified
         });
       });
     });
 
-    proxyReq.on('error', () => {
-      res.writeHead(502, { 'content-type': 'text/plain' });
-      res.end('Bad gateway');
+    proxyReq.on('error', handleProxyError);
+    proxyReq.on('timeout', () => handleProxyError(new Error('Upstream timeout')));
+    req.on('aborted', () => {
+      if (proxyReq && !proxyReq.destroyed) {
+        proxyReq.destroy();
+      }
+    });
+    req.on('error', handleProxyError);
+    res.on('error', handleProxyError);
+    res.on('close', () => {
+      if (proxyReq && !proxyReq.destroyed) {
+        proxyReq.destroy();
+      }
     });
 
     req.pipe(proxyReq);
@@ -321,9 +579,10 @@ export class ProxyServer extends EventEmitter {
       isServer: true,
       secureContext: tls.createSecureContext({
         key: cert.keyPem,
-        cert: cert.certPem
+        cert: cert.chainPem || cert.certPem
       })
     });
+    this.trackSocket(tlsSocket);
 
     tlsSocket.on('error', () => {
       clientSocket.destroy();
@@ -358,6 +617,7 @@ export class ProxyServer extends EventEmitter {
 
     serverSocket.on('close', () => {
       const durationMs = Date.now() - startAt;
+      const requestHeaders = sanitizeHeaders(req.headers);
       this.recordSession({
         url: `https://${host}:${port}`,
         method: 'CONNECT',
@@ -365,6 +625,8 @@ export class ProxyServer extends EventEmitter {
         contentType: '',
         sizeBytes: 0,
         durationMs,
+        requestHeaders,
+        responseHeaders: null,
         matchedRuleId: null,
         applied: false
       });
@@ -372,6 +634,9 @@ export class ProxyServer extends EventEmitter {
   }
 
   recordSession(entry) {
+    if (this.paused) {
+      return;
+    }
     if (this.sessionsStore?.add) {
       const pending = this.sessionsStore.add(entry);
       this.pendingWrites.add(pending);
@@ -393,5 +658,35 @@ export class ProxyServer extends EventEmitter {
       return;
     }
     await Promise.allSettled([...this.pendingWrites]);
+  }
+
+  setPaused(paused) {
+    this.paused = Boolean(paused);
+  }
+
+  trackSocket(socket) {
+    if (!socket) {
+      return;
+    }
+    this.activeSockets.add(socket);
+    socket.on('close', () => {
+      this.activeSockets.delete(socket);
+    });
+  }
+
+  trackServerSockets(server) {
+    if (!server || typeof server.on !== 'function') {
+      return;
+    }
+    server.on('connection', (socket) => this.trackSocket(socket));
+  }
+
+  destroyActiveSockets() {
+    for (const socket of this.activeSockets) {
+      try {
+        socket.destroy();
+      } catch (_error) {}
+    }
+    this.activeSockets.clear();
   }
 }

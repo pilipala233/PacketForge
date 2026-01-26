@@ -1,73 +1,58 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0"
-    />
-    <title>PacketForge</title>
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <main class="app">
-      <header class="app__header">
-        <div>
-          <p class="kicker">Authorized local testing</p>
-          <h1>PacketForge</h1>
-          <p class="muted">
-            Explicit proxy mode with a rule-driven replacement pipeline.
-          </p>
-        </div>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PacketForge</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+
+<body>
+  <main class="app">
+    <header class="app__header">
+      <div>
+        <p class="kicker" data-i18n="app.subtitle">授权代理工具 - 本地测试专用</p>
+        <h1 data-i18n="app.title">PacketForge</h1>
+        <p class="muted">
+          <span data-i18n="mitm.title">LAN MITM</span>
+        </p>
+      </div>
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <select id="language-selector" class="language-selector"
+          style="padding: 0.5rem; border-radius: 4px; border: 1px solid #ddd;">
+          <option value="zh-CN">简体中文</option>
+          <option value="en-US">English</option>
+        </select>
         <div class="badge">
           <span class="badge__label">Version</span>
           <span id="app-version" class="badge__value">-</span>
         </div>
-      </header>
+      </div>
+    </header>
 
-      <section class="grid">
-        <div class="card">
-          <h2>Status & Controls</h2>
+    <div class="layout-container">
+      <!-- 左侧边栏：配置和范围 -->
+      <aside class="sidebar">
+        <section class="panel">
+          <div>
+            <h2 data-i18n="scope.title">Scope</h2>
+            <p class="muted" data-i18n="scope.description">
+              PacketForge is intended for authorized, local testing only. You must have
+              explicit permission to intercept or modify traffic.
+            </p>
+          </div>
+          <div class="panel__hint">
+            <span class="label" data-i18n="scope.mode">Mode</span>
+            <span class="value" data-i18n="scope.mode.explicit">Explicit proxy</span>
+          </div>
+        </section>
+
+        <div class="card card--compact">
+          <h2 data-i18n="proxy.https">HTTPS 拦截</h2>
           <div class="status">
             <div class="status__row">
-              <span class="label">Proxy</span>
-              <span id="proxy-status" class="value">Stopped</span>
-            </div>
-            <div class="status__row">
-              <span class="label">Rules</span>
-              <span id="rules-count" class="value">0</span>
-            </div>
-            <div class="status__row">
-              <span class="label">Session</span>
-              <span id="session-count" class="value">0</span>
-            </div>
-            <div class="status__row">
-              <span class="label">Port</span>
-              <span id="proxy-port-label" class="value">8080</span>
-            </div>
-          </div>
-
-          <form id="proxy-form" class="form">
-            <div class="field">
-              <label for="proxy-port">Proxy Port</label>
-              <input id="proxy-port" type="number" min="1" max="65535" value="8080" />
-            </div>
-            <div class="button-row">
-              <button type="submit" class="button button--primary">Start</button>
-              <button id="proxy-stop" type="button" class="button button--ghost">Stop</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>HTTPS Intercept</h2>
-          <p class="muted">
-            Enable only with explicit authorization. Install the local CA certificate on test
-            devices to inspect HTTPS traffic.
-          </p>
-          <div class="status">
-            <div class="status__row">
-              <span class="label">Mode</span>
+              <span class="label" data-i18n="proxy.https">HTTPS 拦截</span>
               <span id="https-mode" class="value">Tunnel</span>
             </div>
             <div class="status__row">
@@ -79,148 +64,298 @@
             <div class="field">
               <div class="toggle">
                 <input id="https-intercept" type="checkbox" />
-                <label for="https-intercept">Enable HTTPS interception</label>
+                <label for="https-intercept" data-i18n="proxy.enable-https">启用 HTTPS 拦截</label>
               </div>
             </div>
             <div class="field">
-              <label for="ca-path">CA Certificate Path</label>
+              <label for="ca-path" data-i18n="cert.path">证书路径</label>
               <input id="ca-path" type="text" readonly />
             </div>
             <div class="button-row">
-              <button id="ca-generate" type="button" class="button button--ghost">Generate CA</button>
-              <button id="ca-copy" type="button" class="button button--ghost">Copy Path</button>
+              <button id="ca-generate" type="button" class="button button--ghost button--small"
+                data-i18n="cert.title">证书管理</button>
+              <button id="ca-copy" type="button" class="button button--ghost button--small"
+                data-i18n="cert.copy-path">复制路径</button>
             </div>
           </form>
         </div>
 
-        <div class="card">
-          <h2>Rules</h2>
-          <form id="rule-form" class="form">
-            <div class="field">
-              <label for="rule-name">Name</label>
-              <input id="rule-name" type="text" placeholder="Replace hero image" required />
+        <div class="card card--compact">
+          <h2>LAN MITM</h2>
+          <div class="status">
+            <div class="status__row">
+              <span class="label" data-i18n="mitm.status">状态</span>
+              <span id="mitm-status" class="value">Inactive</span>
             </div>
-            <div class="field">
-              <label for="rule-priority">Priority</label>
-              <input id="rule-priority" type="number" value="0" />
+            <div class="status__row">
+              <span class="label" data-i18n="mitm.interface">网络接口</span>
+              <span id="mitm-interface" class="value">-</span>
             </div>
+          </div>
+
+          <form id="mitm-form" class="form">
             <div class="field">
-              <label for="rule-url">URL Contains</label>
-              <input id="rule-url" type="text" placeholder="/assets/" />
-            </div>
-            <div class="field">
-              <label for="rule-method">Method</label>
-              <select id="rule-method">
-                <option value="">Any</option>
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-                <option value="PUT">PUT</option>
-                <option value="DELETE">DELETE</option>
+              <label for="mitm-interface-select" data-i18n="mitm.interface">网络接口</label>
+              <select id="mitm-interface-select" required>
+                <option value="" data-i18n="mitm.interface.select">选择网络接口...</option>
               </select>
+              <button id="mitm-refresh-interfaces" type="button" class="button button--ghost button--small"
+                data-i18n="mitm.interface.refresh">刷新</button>
+            </div>
+
+            <div class="field">
+              <label data-i18n="mitm.gateway">网关</label>
+              <div id="mitm-gateway-info" class="muted">-</div>
+              <button id="mitm-detect-gateway" type="button" class="button button--ghost button--small"
+                data-i18n="mitm.gateway.detect">检测网关</button>
+            </div>
+
+            <div class="field">
+              <label data-i18n="mitm.scan">扫描网络</label>
+              <button id="mitm-scan-network" type="button" class="button button--ghost button--small"
+                data-i18n="mitm.scan.button">扫描设备</button>
+              <div id="mitm-devices-list" class="devices-list"></div>
+            </div>
+
+            <div class="field">
+              <label for="mitm-proxy-port" data-i18n="mitm.proxy-port">透明代理端口</label>
+              <input id="mitm-proxy-port" type="number" min="1" max="65535" value="8888" />
             </div>
             <div class="field">
-              <label for="rule-content-type">Content-Type</label>
-              <input id="rule-content-type" type="text" placeholder="image/png" />
+              <label for="mitm-http-ports" data-i18n="mitm.http-ports">HTTP 端口范围</label>
+              <input id="mitm-http-ports" type="text" placeholder="80,8080,8000-8010" value="80" />
             </div>
             <div class="field">
-              <label for="rule-headers">Headers Contains</label>
-              <textarea
-                id="rule-headers"
-                rows="2"
-                placeholder="User-Agent: Mozilla&#10;X-Debug: true"
-              ></textarea>
+              <label for="mitm-https-ports" data-i18n="mitm.https-ports">HTTPS 端口范围</label>
+              <input id="mitm-https-ports" type="text" placeholder="443,8443" value="443" />
             </div>
             <div class="field">
-              <label for="rule-body-contains">Response Body Contains</label>
-              <input id="rule-body-contains" type="text" placeholder="error code" />
+              <div class="toggle">
+                <input id="mitm-https-observe" type="checkbox" />
+                <label for="mitm-https-observe" data-i18n="mitm.https.observe">HTTPS ????? (SNI)</label>
+              </div>
+              <p class="muted" data-i18n="mitm.https.observe.hint">??? HTTPS????????</p>
+            </div>
+
+            <div class="field">
+              <label for="mitm-upload-kbps" data-i18n="mitm.throttle.upload">Upload limit (KB/s)</label>
+              <input id="mitm-upload-kbps" type="number" min="0" step="10" value="0" />
             </div>
             <div class="field">
-              <label for="rule-action-type">Action</label>
-              <select id="rule-action-type">
-                <option value="replaceBody">Replace Body</option>
-                <option value="replaceResource">Replace With Resource</option>
-                <option value="block">Block</option>
-                <option value="redirect">Redirect</option>
-              </select>
+              <label for="mitm-download-kbps" data-i18n="mitm.throttle.download">Download limit (KB/s)</label>
+              <input id="mitm-download-kbps" type="number" min="0" step="10" value="0" />
+              <p class="muted" data-i18n="mitm.throttle.hint">0 = no limit (per target)</p>
             </div>
-            <div class="field" id="rule-text-field">
-              <label for="rule-action-body">Body</label>
-              <textarea id="rule-action-body" rows="3" placeholder="Replacement body"></textarea>
-            </div>
-            <div class="field hidden" id="rule-resource-field">
-              <label for="rule-action-resource">Resource</label>
-              <select id="rule-action-resource"></select>
-            </div>
-            <div class="field hidden" id="rule-redirect-field">
-              <label for="rule-action-location">Redirect Location</label>
-              <input id="rule-action-location" type="text" placeholder="https://example.com" />
-            </div>
-            <div class="field hidden" id="rule-status-field">
-              <label for="rule-action-status">Status</label>
-              <input id="rule-action-status" type="number" min="100" max="599" placeholder="302" />
-            </div>
+
             <div class="button-row">
-              <button id="rule-submit" type="submit" class="button button--primary">Add Rule</button>
-              <button id="rule-cancel" type="button" class="button button--ghost hidden">Cancel</button>
+              <button id="mitm-request-privileges" type="button" class="button button--ghost hidden button--small"
+                data-i18n="mitm.request-admin">请求管理员权限</button>
+              <button id="mitm-start" type="button" class="button button--primary button--small"
+                data-i18n="mitm.start">启动 MITM</button>
+              <button id="mitm-stop" type="button" class="button button--ghost button--small"
+                data-i18n="mitm.stop">停止</button>
             </div>
           </form>
-          <ul id="rules-list" class="list"></ul>
         </div>
-      </section>
 
-      <section class="panel">
-        <div>
-          <h2>Scope</h2>
-          <p class="muted">
-            PacketForge is intended for authorized, local testing only. You must have
-            explicit permission to intercept or modify traffic.
-          </p>
+        <div class="card card--compact">
+          <h2 data-i18n="capture.title">会话存档</h2>
+          <form id="capture-form" class="form">
+            <div class="field">
+              <label for="capture-dir" data-i18n="capture.dir">保存目录</label>
+              <div class="field-row">
+                <input id="capture-dir" type="text" placeholder="C:\\PacketForge\\captures" />
+                <button id="capture-dir-browse" type="button" class="button button--ghost button--small"
+                  data-i18n="capture.browse">选择</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="capture-max-size" data-i18n="capture.max-size">单次上限 (MB)</label>
+              <input id="capture-max-size" type="number" min="1" value="100" />
+            </div>
+            <p class="muted" data-i18n="capture.hint">超过上限仅保存前 N MB</p>
+            <div class="field">
+              <label for="ffmpeg-path" data-i18n="capture.ffmpeg-path">FFmpeg Path</label>
+              <div class="field-row">
+                <input id="ffmpeg-path" type="text" placeholder="C:\ffmpeg\bin\ffmpeg.exe" />
+                <button id="ffmpeg-browse" type="button" class="button button--ghost button--small"
+                  data-i18n="capture.ffmpeg-browse">Browse</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="auto-convert" data-i18n="capture.auto-convert">Auto Convert</label>
+              <select id="auto-convert">
+                <option value="off" data-i18n="capture.auto-convert.off">Off</option>
+                <option value="remux" data-i18n="capture.auto-convert.remux">FLV -> MP4 (remux)</option>
+                <option value="h264" data-i18n="capture.auto-convert.h264">FLV -> MP4 (H.264)</option>
+              </select>
+              <p class="muted" data-i18n="capture.ffmpeg-hint">Requires ffmpeg executable</p>
+            </div>
+          </form>
         </div>
-        <div class="panel__hint">
-          <span class="label">Mode</span>
-          <span class="value">Explicit proxy</span>
-        </div>
-      </section>
 
-      <section class="grid">
-        <div class="card">
-          <h2>Resources</h2>
+        <div class="card card--compact">
+          <h2 data-i18n="resources.title">资源管理</h2>
           <form id="resource-form" class="form">
             <div class="field">
-              <label for="resource-name">Name</label>
+              <label for="resource-name" data-i18n="resources.name">资源名称</label>
               <input id="resource-name" type="text" placeholder="Hero image" required />
             </div>
             <div class="field">
-              <label for="resource-type">Content-Type</label>
+              <label for="resource-type" data-i18n="rules.content-type">Content-Type</label>
               <input id="resource-type" type="text" placeholder="image/png" />
             </div>
             <div class="field">
               <label for="resource-file">File</label>
               <input id="resource-file" type="file" required />
             </div>
-            <button type="submit" class="button button--primary">Add Resource</button>
+            <button type="submit" class="button button--primary button--small" data-i18n="resources.add">添加资源</button>
           </form>
           <ul id="resources-list" class="list"></ul>
         </div>
+      </aside>
 
-        <div class="card">
-          <div class="card__header">
-            <h2>Sessions</h2>
-            <button id="sessions-clear" class="button button--ghost">Clear</button>
+      <!-- 右侧主内容区：规则和会话 -->
+      <main class="main-content">
+        <div class="split-view">
+          <!-- 上半部分：规则管理 -->
+          <div class="card card--flex">
+            <h2 data-i18n="rules.title">规则管理</h2>
+            <div class="rules-container">
+              <form id="rule-form" class="form form--grid">
+                <div class="field">
+                  <label for="rule-name" data-i18n="rules.name">规则名称</label>
+                  <input id="rule-name" type="text" data-i18n-placeholder="rules.name" placeholder="替换图片" required />
+                </div>
+                <div class="field">
+                  <label for="rule-url" data-i18n="rules.url">URL 模式</label>
+                  <input id="rule-url" type="text" placeholder="/assets/" />
+                </div>
+                <div class="field">
+                  <label for="rule-method" data-i18n="rules.method">方法</label>
+                  <select id="rule-method">
+                    <option value="">Any</option>
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="DELETE">DELETE</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="rule-action-type" data-i18n="rules.action">动作</label>
+                  <select id="rule-action-type">
+                    <option value="replaceBody" data-i18n="rules.action.replace">替换响应体</option>
+                    <option value="replaceResource">Replace With Resource</option>
+                    <option value="block" data-i18n="rules.action.block">阻断请求</option>
+                    <option value="redirect" data-i18n="rules.action.redirect">重定向</option>
+                  </select>
+                </div>
+                <div class="field" id="rule-text-field" style="grid-column: 1 / -1;">
+                  <label for="rule-action-body">Body</label>
+                  <textarea id="rule-action-body" rows="3" placeholder="Replacement body"></textarea>
+                </div>
+                <div class="field hidden" id="rule-resource-field" style="grid-column: 1 / -1;">
+                  <label for="rule-action-resource">Resource</label>
+                  <select id="rule-action-resource"></select>
+                </div>
+                <div class="field hidden" id="rule-redirect-field" style="grid-column: 1 / -1;">
+                  <label for="rule-action-location">Redirect Location</label>
+                  <input id="rule-action-location" type="text" placeholder="https://example.com" />
+                </div>
+
+                <!-- 隐藏的高级字段，默认折叠或精简显示 -->
+                <div class="field hidden">
+                  <label for="rule-priority">Priority</label>
+                  <input id="rule-priority" type="number" value="0" />
+                </div>
+                <div class="field hidden">
+                  <label for="rule-content-type" data-i18n="rules.content-type">Content-Type</label>
+                  <input id="rule-content-type" type="text" placeholder="image/png" />
+                </div>
+                <div class="field hidden">
+                  <label for="rule-headers" data-i18n="rules.header">请求头</label>
+                  <textarea id="rule-headers" rows="2"></textarea>
+                </div>
+                <div class="field hidden">
+                  <label for="rule-body-contains" data-i18n="rules.response-body">响应体包含</label>
+                  <input id="rule-body-contains" type="text" />
+                </div>
+
+                <div class="button-row" style="grid-column: 1 / -1; justify-content: flex-end;">
+                  <button id="rule-submit" type="submit" class="button button--primary"
+                    data-i18n="rules.add">添加规则</button>
+                  <button id="rule-cancel" type="button" class="button button--ghost hidden"
+                    data-i18n="common.cancel">取消</button>
+                </div>
+              </form>
+              <div class="rules-list-container">
+                <ul id="rules-list" class="list"></ul>
+              </div>
+            </div>
           </div>
-          <div class="filter-row">
-            <input id="sessions-filter" type="text" placeholder="Filter by URL or method" />
-            <label class="toggle toggle--compact">
-              <input id="sessions-applied-only" type="checkbox" />
-              <span>Modified only</span>
-            </label>
+
+          <!-- 下半部分：会话日志 -->
+          <div class="card card--flex">
+            <div class="card__header">
+              <div>
+                <h2 data-i18n="sessions.title">会话日志</h2>
+                <div class="status__row" style="margin-top: 4px; font-size: 0.85rem;">
+                  <span class="label" data-i18n="rules.title">规则</span>: <span id="rules-count" class="value">0</span>
+                  <span class="muted"> | </span>
+                  <span class="label" data-i18n="sessions.title">会话</span>: <span id="session-count"
+                    class="value">0</span>
+                </div>
+              </div>
+              <div class="button-row">
+                <button id="sessions-pause" class="button button--ghost button--small"
+                  data-i18n="sessions.pause">??</button>
+                <button id="sessions-clear" class="button button--ghost button--small"
+                data-i18n="sessions.clear">清空</button>
+              </div>
+            </div>
+            <div class="filter-row">
+              <input id="sessions-filter" type="text" data-i18n-placeholder="sessions.filter"
+                placeholder="按 URL 或方法过滤" />
+              <label class="filter-row__group">
+                <span class="label" data-i18n="sessions.maxEntries">??</span>
+                <input id="sessions-max-entries" type="number" min="20" max="5000" step="10"
+                  value="200" />
+              </label>
+              <label class="toggle toggle--compact">
+                <input id="sessions-applied-only" type="checkbox" />
+                <span>Modified only</span>
+              </label>
+              <label class="toggle toggle--compact">
+                <input id="sessions-hide-udp" type="checkbox" />
+                <span data-i18n="sessions.hideUdp">Hide UDP</span>
+              </label>
+            </div>
+            <div class="sessions-container">
+              <ul id="sessions-list" class="list list--compact"></ul>
+            </div>
           </div>
-          <ul id="sessions-list" class="list list--compact"></ul>
-          <div id="session-detail" class="detail muted">Select a session to inspect.</div>
         </div>
-      </section>
-    </main>
+      </main>
+    </div>
+  </main>
 
-    <script type="module" src="./renderer.js"></script>
-  </body>
+  <div id="session-modal" class="modal">
+    <div class="modal__backdrop" data-action="close"></div>
+    <div class="modal__panel">
+      <div class="modal__header">
+        <h3 id="session-modal-title" class="modal__title" data-i18n="sessions.detail">会话详情</h3>
+        <button id="session-modal-close" type="button" class="button button--ghost button--small"
+          data-i18n="common.close">关闭</button>
+      </div>
+      <div class="modal__body">
+        <div id="session-detail" class="detail muted" data-i18n="sessions.detail.empty">
+          Select a session to inspect.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./renderer.js"></script>
+</body>
+
 </html>

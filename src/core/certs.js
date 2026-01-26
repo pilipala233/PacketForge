@@ -215,25 +215,41 @@ export function createCertificateManager(baseDir, options = {}) {
     const task = (async () => {
       const fileKey = path.join(hostsDir, `${sanitizeHost(normalized)}.key`);
       const fileCert = path.join(hostsDir, `${sanitizeHost(normalized)}.crt`);
+      const ca = await ensureCa();
       const [keyPem, certPem] = await Promise.all([
         readIfExists(fileKey),
         readIfExists(fileCert)
       ]);
       if (keyPem && certPem) {
-        const existing = { keyPem, certPem };
-        hostCache.set(normalized, existing);
-        return existing;
+        try {
+          const parsed = forge.pki.certificateFromPem(certPem);
+          const valid = parsed.verify(ca.cert);
+          if (valid) {
+            const existing = {
+              keyPem,
+              certPem,
+              chainPem: `${certPem}\n${ca.certPem}`
+            };
+            hostCache.set(normalized, existing);
+            return existing;
+          }
+        } catch (_error) {
+          // fall through to regenerate
+        }
       }
 
-      const ca = await ensureCa();
       const generated = generateHostCertificate(normalized, ca, {
         keyBits: certKeyBits,
         validDays: certValidDays
       });
       await writePem(fileKey, generated.keyPem, 0o600);
       await writePem(fileCert, generated.certPem, 0o644);
-      hostCache.set(normalized, generated);
-      return generated;
+      const result = {
+        ...generated,
+        chainPem: `${generated.certPem}\n${ca.certPem}`
+      };
+      hostCache.set(normalized, result);
+      return result;
     })();
 
     pendingHosts.set(normalized, task);
